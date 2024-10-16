@@ -54,7 +54,8 @@ class MaskedAutoencoderViT(nn.Module):
                                       requires_grad=False)  # fixed sin-cos embedding
 
         self.blocks = nn.ModuleList([
-            Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
+            # Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
+            Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
             for i in range(depth)])
         self.norm = norm_layer(embed_dim)
         # --------------------------------------------------------------------------
@@ -71,14 +72,16 @@ class MaskedAutoencoderViT(nn.Module):
 
         # reconstructor
         self.decoder_blocks = nn.ModuleList([
-            Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
+            # Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
+            Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
             for i in range(decoder_depth)])
         self.decoder_norm = norm_layer(decoder_embed_dim)
         self.decoder_pred = nn.Linear(decoder_embed_dim, patch_size ** 2 * in_chans, bias=True)  # decoder to patch
 
         # loss predictor
         self.decoder_blocks_losspred = nn.ModuleList([
-            Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
+            # Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
+            Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
             for i in range(decoder_depth)])
         self.decoder_norm_losspred = norm_layer(decoder_embed_dim)
         self.decoder_pred_losspred = nn.Linear(decoder_embed_dim, patch_size ** 2 * in_chans, bias=True)  # decoder to patch
@@ -327,11 +330,50 @@ class MaskedAutoencoderViT(nn.Module):
             return loss
 
 
+def extract_vit_backbone(ckpt, source: str='mae',prefix=None)->callable:
+    # prefix='encoder.layers
+    state_dict=ckpt
+    if prefix !=None:
+         for k in list(state_dict.keys()):
+            if k.startswith(f'{prefix}.'):
+                # print(k)
+                if not k.startswith(f'{prefix}.fc'):
+                    # remove prefix
+                    state_dict[k[len(f"{prefix}."):]] = state_dict[k]
+            # del掉不是backbone的部分
+            del state_dict[k]
+
+
+    if source == None:
+
+        for k in list(state_dict.keys()):
+            if k.startswith('head'):
+                del state_dict[k]
+        return state_dict
+    elif source=='mae':
+        for k in list(state_dict.keys()):
+            if k.startswith('patch_embed'):
+                state_dict[k.replace('projection','proj')]=state_dict[k]
+                del state_dict[k]
+            elif k.startswith('layers'):
+                layer_num=eval(k.split('.')[1])
+                new_key='blocks'+k[len("layers"):]
+                new_key=new_key.replace('.ln','.norm').replace('.ffn.layers.0.0.','.mlp.fc1.').replace('.ffn.layers.1','.mlp.fc2')
+                state_dict[new_key]=state_dict[k]
+                del state_dict[k]
+            elif k.startswith('ln1'):
+                state_dict[k.replace('ln1','norm')]=state_dict[k]
+                del state_dict[k]
+        return state_dict
+
 def mae_vit_base_patch16_dec512d8b(**kwargs):
     model = MaskedAutoencoderViT(
         patch_size=16, embed_dim=768, depth=12, num_heads=12,
         decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+    ckpt=torch.load('../preTrain/vit_base_p16_224_timm.pth')
+    ckpt_dict=extract_vit_backbone(ckpt,source=None)
+    model.load_state_dict(ckpt_dict,strict=False)
     return model
 
 

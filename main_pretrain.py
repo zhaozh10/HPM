@@ -23,7 +23,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 import timm
 
-assert timm.__version__ == "0.3.2"  
+# assert timm.__version__ == "0.3.2"  
 import timm.optim.optim_factory as optim_factory
 from timm.utils import ModelEma
 
@@ -31,6 +31,7 @@ from util import utils
 import util.misc as misc
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 from util.datasets import ImageListFolder
+from util.datasets import Reflacx
 
 from engine_pretrain import train_one_epoch
 from mask_transform import MaskTransform
@@ -38,6 +39,8 @@ from mask_transform import MaskTransform
 import models_mae
 import models_mae_learn_loss
 import models_mae_learn_feature_loss
+
+
 
 
 def get_args_parser():
@@ -50,7 +53,7 @@ def get_args_parser():
     parser.add_argument('--bf16', action='store_true', help='whether to use bf16')
 
     # Model parameters
-    parser.add_argument('--model', default='mae_vit_large_patch16', type=str, metavar='MODEL',
+    parser.add_argument('--model', default='mae_vit_base_patch16_dec512d8b', type=str, metavar='MODEL',
                         help='Name of model to train')
 
     parser.add_argument('--input_size', default=224, type=int, help='images input size')
@@ -101,16 +104,16 @@ def get_args_parser():
                         help='epochs to warmup LR, 40 for MAE and 10 for SimMIM')
 
     # Dataset parameters
-    parser.add_argument('--data_path', default='/path/to/imagenet/', type=str,
+    parser.add_argument('--data_path', default='../data/reflacx-1.0.0/', type=str,
                         help='dataset path')
 
-    parser.add_argument('--output_dir', default='./output_dir', help='path where to save, empty for no saving')
-    parser.add_argument('--log_dir', default='./output_dir', help='path where to tensorboard log')
+    parser.add_argument('--output_dir', default='./output_dir/pretrain', help='path where to save, empty for no saving')
+    parser.add_argument('--log_dir', default='./log_dir/pretrain', help='path where to tensorboard log')
     parser.add_argument('--device', default='cuda', help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--resume', default='', help='resume from checkpoint')
     parser.add_argument('--load_from', default='', help='load pretrained checkpoint model')
-    parser.add_argument('--experiment', default='exp', type=str, help='experiment name (for log)')
+    parser.add_argument('--experiment', default='hpm_in1k_ep800', type=str, help='experiment name (for log)')
 
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N', help='start epoch')
     parser.add_argument('--num_workers', default=8, type=int)
@@ -147,8 +150,7 @@ def main(args):
     transform_train = MaskTransform(args)
 
     # build dataset
-    dataset_train = ImageListFolder(os.path.join(args.data_path, 'train'), transform=transform_train,
-                                    ann_file=os.path.join(args.data_path, 'train.txt'))
+    dataset_train = Reflacx(args.data_path,transform_train)
     print(dataset_train)
     num_tasks = misc.get_world_size()
     global_rank = misc.get_rank()
@@ -231,7 +233,9 @@ def main(args):
 
     # define ema model
     model_ema = None
-    if args.byol or args.learning_loss or args.learn_feature_loss == 'ema':
+    # if args.byol or args.learning_loss or args.learn_feature_loss == 'ema':
+    if args.learning_loss or args.learn_feature_loss == 'ema':
+        print("momentum intialized!")
         # use momentum encoder for BYOL
         model_ema = ModelEma(model, decay=0.999, device=args.device, resume='')
 
